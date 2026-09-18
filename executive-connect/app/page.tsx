@@ -47,11 +47,8 @@ export default function RootPage() {
     setIsMapFiltered(visible.length !== MOCK_EVENTS.length);
   }, []);
 
-  // Upcoming events filtered by current map scope
-  const activeEventsSource = mapScopedEvents.length > 0 ? mapScopedEvents : MOCK_EVENTS;
-  const upcomingEvents = activeEventsSource
-    .filter((e) => e.id !== "evt-001")
-    .slice(0, 5);
+  // Upcoming events filtered strictly by current map scope when zoomed
+  const upcomingEvents = (isMapFiltered ? mapScopedEvents : MOCK_EVENTS).slice(0, 5);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F8F9FC]">

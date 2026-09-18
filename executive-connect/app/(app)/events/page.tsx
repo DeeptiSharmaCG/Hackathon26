@@ -17,22 +17,6 @@ import FeaturedEventCard from "@/components/dashboard/FeaturedEventCard";
 import { AccessType, Event } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 
-const DOMAINS = ["All", "AI/ML", "Cloud", "FinTech", "HealthTech", "Cyber", "Leadership"];
-const CITIES = [
-  "All",
-  "San Francisco",
-  "New York",
-  "London",
-  "Seattle",
-  "Boston",
-  "Dallas",
-  "Austin",
-  "Chicago",
-  "Miami",
-  "Singapore",
-  "Berlin",
-  "Los Angeles",
-];
 const ACCESS: (AccessType | "All")[] = ["All", "Public", "Paid", "Invite Only"];
 
 export default function EventsPage() {
@@ -42,6 +26,33 @@ export default function EventsPage() {
   const [city, setCity] = useState("All");
   const [access, setAccess] = useState<AccessType | "All">("All");
   const [sortBy, setSortBy] = useState<"match" | "date" | "attendees">("match");
+
+  // Dynamic filter lists from 500 events
+  const DOMAINS = useMemo(() => {
+    const counts: Record<string, number> = {};
+    MOCK_EVENTS.forEach((e) => {
+      e.topics.forEach((t) => {
+        counts[t] = (counts[t] || 0) + 1;
+      });
+    });
+    const sorted = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 9)
+      .map(([t]) => t);
+    return ["All", ...sorted];
+  }, []);
+
+  const CITIES = useMemo(() => {
+    const counts: Record<string, number> = {};
+    MOCK_EVENTS.forEach((e) => {
+      counts[e.city] = (counts[e.city] || 0) + 1;
+    });
+    const sorted = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([c]) => c);
+    return ["All", ...sorted];
+  }, []);
 
   const filtered = useMemo(() => {
     return MOCK_EVENTS.filter((e) => {

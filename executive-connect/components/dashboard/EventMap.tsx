@@ -25,6 +25,8 @@ export default function EventMap({
   const mapInstanceRef = useRef<any>(null);
   const markersLayerRef = useRef<any>(null);
   const isInternalMoveRef = useRef<boolean>(false);
+  const renderTimeoutRef = useRef<any>(null);
+
   const onVisibleEventsChangeRef = useRef(onVisibleEventsChange);
   onVisibleEventsChangeRef.current = onVisibleEventsChange;
 
@@ -37,12 +39,119 @@ export default function EventMap({
   const onSelectEventRef = useRef(onSelectEvent);
   onSelectEventRef.current = onSelectEvent;
 
+  const activeEventIdRef = useRef(activeEventId);
+  activeEventIdRef.current = activeEventId;
+
   const [selectedPopupEvent, setSelectedPopupEvent] = useState<Event | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number>(events.length);
   const [isFilteredByMap, setIsFilteredByMap] = useState<boolean>(false);
 
-  // Initialize map with Leaflet dynamically - ONLY ONCE on mount
+  // Helper to render reduced/sampled pins based on current zoom and bounds
+  const updateMarkersForViewport = useCallback(async () => {
+    if (!mapInstanceRef.current || !markersLayerRef.current) return;
+    const L = (await import("leaflet")).default;
+    const map = mapInstanceRef.current;
+    const markersLayer = markersLayerRef.current;
+    if (!map || !markersLayer) return;
+
+    markersLayer.clearLayers();
+
+    const currentEvents = eventsRef.current;
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+
+    // Scale-based maximum pins:
+    // Low zoom (national/continental <= 5): ~25 pins
+    // Mid zoom (regional 6-8): ~35 pins
+    // High zoom (metro/city >= 9): ~50 pins
+    const maxPins = zoom <= 5 ? 26 : zoom <= 8 ? 36 : 50;
+
+    // Filter events within current viewport
+    const inBounds = currentEvents.filter((e) => {
+      if (!e.coordinates || typeof e.coordinates.lat !== "number" || typeof e.coordinates.lng !== "number") return false;
+      return bounds.contains([e.coordinates.lat, e.coordinates.lng]);
+    });
+
+    setVisibleCount(inBounds.length);
+    const isFiltered = inBounds.length < currentEvents.length;
+    setIsFilteredByMap(isFiltered);
+    onVisibleEventsChangeRef.current?.(inBounds);
+
+    // Smart pin sampling across cities to avoid clutter & lag
+    const selectedToRender: Event[] = [];
+    const currentActiveId = activeEventIdRef.current;
+
+    // Always include active event if in bounds
+    if (currentActiveId) {
+      const activeEvt = inBounds.find((e) => e.id === currentActiveId);
+      if (activeEvt) selectedToRender.push(activeEvt);
+    }
+
+    // Group by city for even geographic distribution across visible area
+    const byCity: Record<string, Event[]> = {};
+    inBounds.forEach((e) => {
+      if (e.id === currentActiveId) return;
+      if (!byCity[e.city]) byCity[e.city] = [];
+      byCity[e.city].push(e);
+    });
+
+    const cities = Object.keys(byCity);
+    cities.forEach((c) => byCity[c].sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0)));
+
+    let round = 0;
+    while (selectedToRender.length < maxPins) {
+      let added = false;
+      for (const city of cities) {
+        if (selectedToRender.length >= maxPins) break;
+        if (round < byCity[city].length) {
+          selectedToRender.push(byCity[city][round]);
+          added = true;
+        }
+      }
+      if (!added) break;
+      round++;
+    }
+
+    // Render only the sampled subset of pins (25-50 max) for maximum performance
+    selectedToRender.forEach((evt) => {
+      const { lat, lng } = evt.coordinates!;
+      const isActive = currentActiveId === evt.id;
+
+      const markerHtml = `
+        <div class="airbnb-marker-pill ${isActive ? "active" : ""}" id="marker-${evt.id}">
+          <div class="pill-content">
+            <span class="pill-price">${evt.accessType === "Paid" ? "$Paid" : evt.accessType === "Invite Only" ? "Invite" : "Free"}</span>
+            ${evt.matchScore ? `<span class="pill-match">${evt.matchScore}%</span>` : ""}
+          </div>
+          <div class="pill-arrow"></div>
+        </div>
+      `;
+
+      const icon = L.divIcon({
+        html: markerHtml,
+        className: "custom-leaflet-marker",
+        iconSize: [88, 34],
+        iconAnchor: [44, 34],
+      });
+
+      const marker = L.marker([lat, lng], { icon })
+        .on("click", () => {
+          setSelectedPopupEvent(evt);
+          onSelectEventRef.current?.(evt);
+        })
+        .on("mouseover", () => {
+          onHoverEventRef.current?.(evt.id);
+        })
+        .on("mouseout", () => {
+          onHoverEventRef.current?.(null);
+        });
+
+      markersLayer.addLayer(marker);
+    });
+  }, []);
+
+  // Initialize map with Leaflet dynamically - ON MOUNT ONLY
   useEffect(() => {
     if (typeof window === "undefined" || !mapContainerRef.current) return;
 
@@ -53,7 +162,6 @@ export default function EventMap({
 
       if (!isMounted || !mapContainerRef.current) return;
 
-      // Clean up previous instance if exists
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -67,32 +175,22 @@ export default function EventMap({
         attributionControl: false,
       });
 
-      // Standard OpenStreetMap tiles - NO API key required, NO watermark
+      // OpenStreetMap tiles - zero watermark, clean
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         className: "clean-map-tiles",
       }).addTo(map);
 
-      // LayerGroup for all markers
       const markersLayer = L.layerGroup().addTo(map);
       markersLayerRef.current = markersLayer;
 
-      // Calculate visible events on moveend without re-creating map
+      // Debounced moveend handler for smooth zooming and panning
       map.on("moveend", () => {
         if (!isMounted) return;
-        if (isInternalMoveRef.current) {
-          isInternalMoveRef.current = false;
-          return;
-        }
-        const bounds = map.getBounds();
-        const currentEvents = eventsRef.current;
-        const visible = currentEvents.filter((e) => {
-          if (!e.coordinates) return false;
-          return bounds.contains([e.coordinates.lat, e.coordinates.lng]);
-        });
-        setVisibleCount(visible.length);
-        setIsFilteredByMap(true);
-        onVisibleEventsChangeRef.current?.(visible);
+        if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
+        renderTimeoutRef.current = setTimeout(() => {
+          updateMarkersForViewport();
+        }, 120);
       });
 
       mapInstanceRef.current = map;
@@ -103,112 +201,47 @@ export default function EventMap({
 
     return () => {
       isMounted = false;
+      if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         markersLayerRef.current = null;
       }
     };
-  }, []); // Mount effect ONLY - never torn down on re-render
+  }, [updateMarkersForViewport]);
 
-  // Update and render markers whenever events, mapLoaded, or activeEventId change
+  // Initial marker populate when map is loaded
   useEffect(() => {
-    if (!mapLoaded || !mapInstanceRef.current || !markersLayerRef.current) return;
+    if (!mapLoaded) return;
+    updateMarkersForViewport();
+  }, [mapLoaded, updateMarkersForViewport]);
 
-    let isMounted = true;
-
-    async function renderMarkers() {
-      const L = (await import("leaflet")).default;
-      const markersLayer = markersLayerRef.current;
-      if (!markersLayer || !isMounted) return;
-
-      // Clear existing markers cleanly without touching map
-      markersLayer.clearLayers();
-
-      const validCoords: [number, number][] = [];
-
-      events.forEach((evt) => {
-        if (!evt.coordinates || typeof evt.coordinates.lat !== "number" || typeof evt.coordinates.lng !== "number") return;
-        const { lat, lng } = evt.coordinates;
-        validCoords.push([lat, lng]);
-
-        const isActive = activeEventId === evt.id;
-
-        // Custom HTML for Airbnb-style pill marker
-        const markerHtml = `
-          <div class="airbnb-marker-pill ${isActive ? "active" : ""}" id="marker-${evt.id}">
-            <div class="pill-content">
-              <span class="pill-price">${evt.accessType === "Paid" ? "$Paid" : evt.accessType === "Invite Only" ? "Invite" : "Free"}</span>
-              ${evt.matchScore ? `<span class="pill-match">${evt.matchScore}%</span>` : ""}
-            </div>
-            <div class="pill-arrow"></div>
-          </div>
-        `;
-
-        const icon = L.divIcon({
-          html: markerHtml,
-          className: "custom-leaflet-marker",
-          iconSize: [88, 34],
-          iconAnchor: [44, 34],
-        });
-
-        const marker = L.marker([lat, lng], { icon })
-          .on("click", () => {
-            setSelectedPopupEvent(evt);
-            onSelectEventRef.current?.(evt);
-          })
-          .on("mouseover", () => {
-            onHoverEventRef.current?.(evt.id);
-          })
-          .on("mouseout", () => {
-            onHoverEventRef.current?.(null);
-          });
-
-        markersLayer.addLayer(marker);
-      });
-
-      // On first load with markers, fit bounds
-      if (validCoords.length > 0 && !isFilteredByMap && mapInstanceRef.current) {
-        isInternalMoveRef.current = true;
-        mapInstanceRef.current.fitBounds(validCoords, { padding: [35, 35], maxZoom: 5 });
-      }
-    }
-
-    renderMarkers();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [events, mapLoaded, activeEventId, isFilteredByMap]);
-
-  // When activeEventId changes from external hover, gently pan
+  // When activeEventId changes externally, update markers & pan
   useEffect(() => {
+    activeEventIdRef.current = activeEventId;
     if (!mapInstanceRef.current || !activeEventId) return;
-    const targetEvent = events.find((e) => e.id === activeEventId);
+
+    const targetEvent = eventsRef.current.find((e) => e.id === activeEventId);
     if (targetEvent?.coordinates) {
       isInternalMoveRef.current = true;
       mapInstanceRef.current.panTo([targetEvent.coordinates.lat, targetEvent.coordinates.lng], {
         animate: true,
-        duration: 0.4,
+        duration: 0.35,
       });
     }
-  }, [activeEventId, events]);
+  }, [activeEventId]);
 
   const handleZoomIn = () => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.zoomIn();
-    }
+    mapInstanceRef.current?.zoomIn();
   };
 
   const handleZoomOut = () => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.zoomOut();
-    }
+    mapInstanceRef.current?.zoomOut();
   };
 
   const handleResetBounds = useCallback(() => {
     if (!mapInstanceRef.current) return;
-    const allCoords = events
+    const allCoords = eventsRef.current
       .filter((e) => e.coordinates && typeof e.coordinates.lat === "number")
       .map((e) => [e.coordinates!.lat, e.coordinates!.lng] as [number, number]);
 
@@ -218,9 +251,12 @@ export default function EventMap({
     }
     setSelectedPopupEvent(null);
     setIsFilteredByMap(false);
-    setVisibleCount(events.length);
-    onVisibleEventsChangeRef.current?.(events);
-  }, [events]);
+    setVisibleCount(eventsRef.current.length);
+    onVisibleEventsChangeRef.current?.(eventsRef.current);
+    setTimeout(() => {
+      updateMarkersForViewport();
+    }, 200);
+  }, [updateMarkersForViewport]);
 
   return (
     <div className="relative isolate z-0 w-full h-full min-h-[460px] rounded-[18px] overflow-hidden border border-black/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.04)] bg-[#F0F2F5] flex flex-col">
@@ -230,7 +266,7 @@ export default function EventMap({
           onClick={handleResetBounds}
           id="btn-view-all-events"
           title="Reset map and show all events"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/95 hover:bg-white text-[#111827] text-xs font-bold border border-black/[0.12] shadow-md hover:shadow-lg transition-all cursor-pointer backdrop-blur-md active:scale-95"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white text-[#111827] text-xs font-bold border border-black/[0.12] shadow-md hover:shadow-lg transition-all cursor-pointer backdrop-blur-md active:scale-95"
         >
           <Layers className="w-3.5 h-3.5 text-[#4F5FE8]" />
           <span>View All Events</span>
