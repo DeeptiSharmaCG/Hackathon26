@@ -56,10 +56,10 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {open && (
         <>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm" onClick={onClose} />
+            className="fixed inset-0 z-[9999] bg-black/40 backdrop-blur-sm" onClick={onClose} />
           <motion.div initial={{ opacity: 0, scale: 0.96, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -8 }} transition={{ duration: 0.18, ease: "easeOut" }}
-            className="fixed top-[15vh] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg">
+            className="fixed top-[15vh] left-1/2 -translate-x-1/2 z-[10000] w-full max-w-lg">
             <div className="bg-white rounded-[20px] border border-black/[0.08] shadow-[0_20px_80px_rgba(0,0,0,0.15)] overflow-hidden">
               {/* Search input */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-black/[0.06]">

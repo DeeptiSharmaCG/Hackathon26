@@ -40,6 +40,10 @@ export type Event = {
   featured?: boolean;
   matchScore?: number;
   attendeeIds?: string[];
+  imageUrl?: string;
+  coordinates?: { lat: number; lng: number };
+  mode?: "In-person" | "Virtual" | "Hybrid";
+  startTime?: string;
 };
 
 export type Person = {
