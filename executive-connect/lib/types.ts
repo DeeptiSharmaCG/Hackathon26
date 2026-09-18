@@ -33,6 +33,7 @@ export type Event = {
   eventType: EventType;
   accessType: AccessType;
   host: string;
+  hostLinkedin?: string;
   description: string;
   topics: string[];
   attendeeCount: number;

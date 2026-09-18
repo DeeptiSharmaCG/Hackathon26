@@ -2,6 +2,31 @@ import { Event } from "@/lib/types";
 
 export const MOCK_EVENTS: Event[] = [
   {
+    id: "evt-nuess-energy-2026",
+    title: "12th Annual Energy Conference",
+    date: "2026-09-18",
+    endDate: "2026-09-19",
+    venue: "Curry Student Center Ballroom, 360 Huntington Ave",
+    city: "Boston",
+    state: "MA",
+    eventType: "Conference",
+    accessType: "Paid",
+    host: "Northeastern University Energy Systems Society (NUESS)",
+    hostLinkedin: "https://www.linkedin.com/company/nuenergysystemssociety/",
+    description:
+      "The 12th Annual Energy Conference organized by Northeastern University Energy Systems Society (NUESS). Bringing together clean energy innovators, researchers, policymakers, and industry executives to discuss grid modernization, renewable integration, and sustainable energy transitions.",
+    topics: ["Energy", "CleanTech", "Sustainability", "Enterprise"],
+    attendeeCount: 380,
+    registrationUrl: "https://www.linkedin.com/events/7505673144079323136/",
+    featured: true,
+    matchScore: 99,
+    attendeeIds: ["p-001", "p-002", "p-003", "p-005"],
+    imageUrl: "/events/event-2.jpg",
+    coordinates: { lat: 42.3398, lng: -71.0891 },
+    mode: "In-person",
+    startTime: "6:30 PM",
+  },
+  {
     id: "evt-001",
     title: "Global AI & Frontier Models Summit",
     date: "2025-02-14",
