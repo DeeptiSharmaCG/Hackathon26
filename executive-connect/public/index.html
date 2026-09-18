@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Intelligence Graph | Neo4j Shortest Path Discovery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Main Content Area (Header removed, integrated into sidebar) -->
+    <div class="main-layout">
+      <!-- Left Sidebar: Controls & Path Results -->
+      <aside class="sidebar">
+        <!-- Search & Path Discovery Card -->
+        <div class="card control-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-route"></i> Shortest Path Discovery</h2>
+          </div>
+
+          <form id="path-form" class="path-form" onsubmit="handleFindPath(event)">
+            <div class="form-group">
+              <label for="source-select"><i class="fa-solid fa-user"></i> Source Person (You)</label>
+              <div class="select-wrapper">
+                <select id="source-select" required>
+                  <option value="" disabled selected>Loading people...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="swap-divider">
+              <button type="button" class="swap-btn" title="Swap Source & Target" onclick="swapSourceTarget()">
+                <i class="fa-solid fa-arrow-down-up-across-line"></i>
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label for="target-select"><i class="fa-solid fa-bullseye"></i> Target Person / Role</label>
+              <div class="select-wrapper">
+                <select id="target-select" required>
+                  <option value="" disabled selected>Loading people...</option>
+                </select>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block" id="find-path-btn">
+              <i class="fa-solid fa-magnifying-glass"></i> Calculate Shortest Path
+            </button>
+          </form>
+        </div>
+
+        <!-- Path Results & Step-by-Step Card -->
+        <div class="card results-card" id="results-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-diagram-project"></i> Path Overview</h2>
+            <span class="badge badge-hops" id="path-hops-badge">3 Hops</span>
+          </div>
+
+          <div class="path-metrics" id="path-metrics">
+            <div class="metric-box">
+              <span class="metric-val" id="metric-hops">3</span>
+              <span class="metric-label">Hops</span>
+            </div>
+            <div class="metric-box">
+              <span class="metric-val" id="metric-connectors">2</span>
+              <span class="metric-label">Connectors</span>
+            </div>
+            <div class="metric-box">
+              <span class="metric-val" id="metric-confidence">100%</span>
+              <span class="metric-label">Reachable</span>
+            </div>
+          </div>
+
+          <!-- Step-by-Step Chain -->
+          <div class="path-stepper" id="path-stepper">
+            <!-- Dynamically populated steps -->
+          </div>
+        </div>
+
+        <!-- Node Details Card (Inspection) -->
+        <div class="card node-card" id="node-card">
+          <div class="card-header">
+            <h2><i class="fa-solid fa-circle-info"></i> Node Inspector</h2>
+            <button class="icon-btn-sm" onclick="clearNodeSelection()"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="node-info-body" id="node-info-body">
+            <p class="text-muted text-center">Click any node or relationship on the graph to inspect metadata.</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center: Graph Visualization Area -->
+      <main class="graph-viewport">
+        <!-- Floating Toolbar -->
+        <div class="floating-toolbar">
+          <div class="legend">
+            <span class="legend-item"><span class="legend-color node-person"></span> Person</span>
+            <span class="legend-item"><span class="legend-color node-founder"></span> Founder</span>
+            <span class="legend-item"><span class="legend-color node-cto"></span> CTO</span>
+            <span class="legend-item"><span class="legend-color node-company"></span> Company</span>
+            <span class="legend-item"><span class="legend-color node-event"></span> Event</span>
+          </div>
+
+          <div class="toolbar-actions">
+            <button class="btn btn-outline-sm" id="btn-isolate" onclick="togglePathOnly()" title="Toggle full graph vs path only">
+              <i class="fa-solid fa-filter"></i> <span id="isolate-text">Path Only</span>
+            </button>
+            <button class="btn btn-outline-sm" onclick="fitNetwork()" title="Reset Zoom & Pan">
+              <i class="fa-solid fa-expand"></i> Reset View
+            </button>
+            <button class="btn btn-outline-sm" onclick="togglePhysics()" id="physics-btn" title="Toggle Graph Physics Simulation">
+              <i class="fa-solid fa-atom"></i> <span id="physics-text">Freeze Layout</span>
+            </button>
+            <button class="btn btn-outline-sm" onclick="reseedDatabase()" title="Reseed Neo4j Graph">
+              <i class="fa-solid fa-database"></i> Reseed Graph
+            </button>
+          </div>
+        </div>
+
+        <!-- Graph Container (Vis.js Canvas) -->
+        <div id="graph-container"></div>
+
+        <!-- Graph Overlay Loading / Empty State -->
+        <div id="graph-loader" class="graph-loader">
+          <div class="spinner"></div>
+          <p>Querying Neo4j Graph Database...</p>
+        </div>
+
+        <!-- Cypher Query Display Footer -->
+        <div class="cypher-bar">
+          <span class="cypher-label"><i class="fa-solid fa-terminal"></i> Cypher Query:</span>
+          <code id="active-cypher">MATCH p = shortestPath((a:Person {name: 'Tanishq'})-[*..10]-(b:Person {name: 'Shashank Kumar'})) RETURN p</code>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
